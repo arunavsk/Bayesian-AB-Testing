@@ -1,0 +1,55 @@
+---
+title: "Prior Analysis"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+library(reticulate) # install the library if not available
+use_python("/Users/arunavsaikia/opt/anaconda3/bin/python") #your path goes here
+
+```
+
+```{python}
+import pandas as pd
+import numpy as np
+from scipy import stats
+import datetime
+import matplotlib.pyplot as plt 
+```
+
+```{python}
+user_active_pre = pd.read_csv('./t3_user_active_min_pre.csv')
+# print(user_active_pre.dtypes)
+print(user_active_pre.nunique())
+user_active_pre.head()
+
+print(user_active_pre['active_mins'].describe())
+user_active_pre.boxplot(column=['active_mins'], figsize=(5,2), grid = False)
+```
+
+```{python}
+perc75 = np.percentile(user_active_pre['active_mins'], 75)
+perc25 = np.percentile(user_active_pre['active_mins'], 25)
+IQR = perc75 - perc25
+
+user_active_pre_no_outlier = user_active_pre[(user_active_pre['active_mins'] < perc75+1.5*IQR) & (user_active_pre['active_mins'] > perc25-1.5*IQR)]
+
+user_active_pre_no_outlier['active_mins'].describe()
+
+user_active_pre_no_outlier.boxplot(column=['active_mins'], figsize=(3,2), grid = False)
+user_active_pre_no_outlier
+
+```
+
+```{python}
+user_active_grouped = user_active_pre_no_outlier.groupby('uid').agg({'active_mins':sum, 'dt':np.size}).reset_index()
+user_active_grouped['avg_active_mins'] = user_active_grouped['active_mins'] / user_active_grouped['dt']
+user_active_grouped.describe()
+user_active_grouped.to_csv('./pre_all_kpi1.csv', index = False)
+```
+```{python}
+dt_active_grouped = user_active_pre_no_outlier.groupby(['dt'])['active_mins'].mean().reset_index()
+dt_active_grouped.describe()
+plt.hist(dt_active_grouped['active_mins'])
+
+```

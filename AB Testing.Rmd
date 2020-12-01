@@ -1,0 +1,351 @@
+---
+title: "Bayesian A/B Testing for Measuring User Engagement in a Mobile App"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+library(reticulate) # install the library if not available
+use_python("/Users/arunavsaikia/opt/anaconda3/bin/python") #your path goes here
+
+```
+<h3>Imports</h3>
+```{python}
+import pandas as pd
+import numpy as np
+from scipy import stats
+import datetime
+
+```
+<h3>EDA : User Active</h3>
+
+```{python}
+user_active = pd.read_csv('./t1_user_active_min.csv')
+# print(user_active.dtypes)
+print(user_active.nunique())
+user_active.head()
+
+# We can look at the percentile values and box plot to identify outliers
+
+print(user_active['active_mins'].describe())
+
+user_active.boxplot(column=['active_mins'], figsize=(5,2), grid = False)
+```
+```{python}
+# Since the data has outlier we can use $± 1.5*IQR$ to filter
+perc75 = np.percentile(user_active['active_mins'], 75)
+perc25 = np.percentile(user_active['active_mins'], 25)
+IQR = perc75 - perc25
+
+print(IQR)
+user_active_no_outlier = user_active[(user_active['active_mins'] < perc75+1.5*IQR) & (user_active['active_mins'] > perc25-1.5*IQR)]
+user_active_no_outlier.boxplot(column=['active_mins'], figsize=(3,2), grid = False)
+```
+
+<h3>EDA : User Variant </h3>
+```{python}
+user_variant = pd.read_csv('./t2_user_variant.csv')
+# print(user_variant.dtypes)
+print(user_variant.nunique())
+user_variant.head()
+user_variant['variant_number'].value_counts()
+```
+
+<h3> KPIs aka Engagement Metrics for testing </h3>
+
+For our test, we can define two engagement metrics
+```{python}
+user_active_no_outlier_w_variant = user_active_no_outlier.merge(user_variant[['uid','variant_number']], on = 'uid')
+# user_active_no_outlier_w_variant
+
+# KPI 1 - average active time per user
+
+user_active_grouped = user_active_no_outlier_w_variant.groupby(['uid','variant_number']).agg({'active_mins':sum, 'dt':np.size}).reset_index()
+user_active_grouped['avg_active_mins'] = user_active_grouped['active_mins'] / user_active_grouped['dt']
+
+control_group_kpi1 = user_active_grouped[user_active_grouped['variant_number'] == 0 ]
+control_group_kpi1.describe()
+treatment_group_kpi1 = user_active_grouped[user_active_grouped['variant_number'] == 1 ]
+treatment_group_kpi1.describe()
+treatment_group_kpi1.to_csv('./post_treatment_kpi1.csv', index = False)
+control_group_kpi1['avg_active_mins'].to_csv('./control_kpi1.csv', index = False)
+treatment_group_kpi1['avg_active_mins'].to_csv('./treatment_kpi1.csv', index = False)
+
+# KPI 2 - average active time per day
+dt_active_grouped = user_active_no_outlier_w_variant.groupby(['dt','variant_number'])['active_mins'].mean().reset_index()
+
+control_group_kpi2 = dt_active_grouped[dt_active_grouped['variant_number'] == 0 ]
+control_group_kpi2.describe()
+treatment_group_kpi2 = dt_active_grouped[dt_active_grouped['variant_number'] == 1 ]
+treatment_group_kpi2.describe()
+
+control_group_kpi2['active_mins'].to_csv('./control_kpi2.csv', index = False)
+treatment_group_kpi2['active_mins'].to_csv('./treatment_kpi2.csv', index = False)
+```
+
+<h3> Let go R </h3>
+
+```{r}
+name = 'arunav'
+paste('hi', name)
+```
+```{r}
+control1 <- read.csv('./control_kpi1.csv')
+treatment1 <- read.csv('./treatment_kpi1.csv')
+
+control2 <- read.csv('./control_kpi2.csv')
+treatment2 <- read.csv('./treatment_kpi2.csv')
+
+eda_plots <- function(control, treatment, title){
+  hist(control[,1], probability = T)
+  lines(density(control[,1]))
+  
+  hist(treatment[,1], probability = T)
+  lines(density(treatment[,1]))
+  
+  boxplot(list("Control" = control[,1], "Treatment" = treatment[,1]), main = title, ylab = 'minutes' )
+}
+eda_plots(control1, treatment1, 'Distribution of avg active time per user')
+eda_plots(control2, treatment2, 'Distribution of avg active time per day')
+```
+
+Priors and Posteriors
+
+$$
+\begin{align}
+Y \mid \mu, \sigma^2 &\sim \mathcal{Normal}(\mu, \sigma^2) \\
+\mu &\sim \mathcal{Normal}(\mu_0, \tau_0^2) \\
+\sigma^2 &\sim \mathcal{Inv Gamma}(\frac{\nu_0}{2},\frac{\nu_0\sigma_0^2}{2})\\
+
+\mu \mid \sigma^2, Y &\sim \mathcal{N}(\frac{\frac{\mu_0}{\tau_0^2}+\frac{n\bar{\boldsymbol{y}}}{\sigma^2}}{\frac{1}{\tau_0^2}+\frac{n}{\sigma^2}},\frac{1}{\frac{n}{\sigma^2}+\frac{1}{\tau_0^2}})\\
+
+\sigma^2 \mid \mu, Y &\sim \mathcal{InvGamma}(\frac{n+\nu_0}{2},\frac{\sum(y_i-\mu)^2+\nu_0\sigma_0^2}{2})\\
+\end{align}
+$$
+
+Priors?
+Analysis to determine priors can be performed on user engagement behavior before the UI change
+
+Lets go Gibbs
+```{r}
+
+get_MCMC_samples <- function(Y, mu0, tau20, sigma20, nu0, m, mu_init, sigma2_init){
+  n = length(Y)
+  # a = b = 1
+# iterations
+  
+  trace <- array(NA, dim = c(m,2)) # to store MCMC samples
+
+  # Initial values
+  # p = 0.8
+  # theta1 = 100
+  # theta2 = 170
+  # sigma12 = 250
+  # sigma22 = 250
+  # 
+  mu = mu_init
+  sigma2 = sigma2_init
+    
+  # X = rbinom(n, 1, p)
+  # 
+  # n1 = sum(X)
+  # n2 = n - n1
+  
+  ## Gibbs Sampler
+  for (i in 1:m) {
+    
+    # Store values
+    trace[i,1] = mu
+    trace[i,2] = sigma2
+
+    ybar = mean(Y)
+    
+    # Update mean
+    mu = rnorm(1, ((mu0 / tau20) + ((n * ybar) / sigma2)) / ((1 / tau20) + (n / sigma2)), sqrt(1 / ((n / sigma2) + (1 / tau20))))
+
+    # Update sigmas
+    sigma2 = 1 / rgamma(1, (n+nu0) / 2, (sum((Y-mu)^2)+ (nu0 * sigma20 )) / 2)
+  }
+  trace
+}
+
+```
+
+KPI 1
+```{r}
+## KPI 1
+mu0 = 5
+tau20 = 1
+sigma20 = 16
+nu0 = 1
+m = 10000 
+mu_initial = 5
+sigma2_initial = 16
+
+control1.posteriors <- get_MCMC_samples(control1$avg_active_mins, mu0, tau20, sigma20, nu0, m, mu_initial, sigma2_initial)
+treatment1.posteriors <- get_MCMC_samples(treatment1$avg_active_mins, mu0, tau20, sigma20, nu0, m, mu_initial, sigma2_initial)
+
+plot(control1.posteriors[,1], type = 'l')
+plot(treatment1.posteriors[,1], type = 'l')
+plot(control1.posteriors[,2], type = 'l')
+plot(treatment1.posteriors[,2], type = 'l')
+
+require(coda)
+control1.mcmc <- mcmc(control1.posteriors, start=20) # burn in 20
+summary(control1.mcmc)
+effectiveSize(control1.mcmc)
+
+treatment1.mcmc <- mcmc(treatment1.posteriors, start=20) # burn in 20
+summary(treatment1.mcmc)
+effectiveSize(treatment1.mcmc)
+```
+```{r}
+
+mean(treatment1.posteriors[,1] > control1.posteriors[,1])
+mean((treatment1.posteriors[,1] - control1.posteriors[,1]) > 1.5)
+mean(treatment1.posteriors[,1] / control1.posteriors[,1])
+
+
+plot(c(4,8), c(0,20), type='n',  xlab = expression(mu), ylab = 'Density', main = 'Posterior distribution for'~ mu)
+lines(density(treatment1.posteriors[,1]), col= 'blue')
+lines(density(control1.posteriors[,1]), col= 'orange')
+legend('topleft', col = c('blue','orange'), lty = c(1,1), legend = c('Treatment','Control' ))
+
+plot(c(-1,2), c(0,20), type='n',  xlab = expression(mu[diff]), ylab = 'Density', main = 'Posterior distribution for'~ mu[diff])
+lines(density(treatment1.posteriors[,1] - control1.posteriors[,1]))
+```
+
+KPI 2
+```{r}
+## KPI 2
+mu0 = 6.4
+tau20 = 1
+sigma20 = 0.15*0.15
+nu0 = 1
+m = 10000 
+mu_initial = 5
+sigma2_initial =  1
+
+control2.posteriors <- get_MCMC_samples(control2$active_mins, mu0, tau20, sigma20, nu0, m, mu_initial, sigma2_initial)
+treatment2.posteriors <- get_MCMC_samples(treatment2$active_mins, mu0, tau20, sigma20, nu0, m, mu_initial, sigma2_initial)
+
+plot(control2.posteriors[,1], type = 'l')
+plot(treatment2.posteriors[,1], type = 'l')
+plot(control2.posteriors[,2], type = 'l')
+plot(treatment2.posteriors[,2], type = 'l')
+
+require(coda)
+control2.mcmc <- mcmc(control2.posteriors, start=20) # burn in 20
+summary(control2.mcmc)
+effectiveSize(control1.mcmc)
+
+treatment2.mcmc <- mcmc(treatment2.posteriors, start=20) # burn in 20
+summary(treatment2.mcmc)
+effectiveSize(treatment2.mcmc)
+```
+```{r}
+
+mean(treatment2.posteriors[,1] > control2.posteriors[,1])
+mean(treatment2.posteriors[,1] / control2.posteriors[,1])
+
+
+plot(c(4,10), c(0,50), type='n',  xlab = expression(mu), ylab = 'Density', main = 'Posterior distribution for'~ mu)
+lines(density(treatment2.posteriors[,1]), col= 'blue')
+lines(density(control2.posteriors[,1]), col= 'orange')
+legend('topleft', col = c('blue','orange'), lty = c(1,1), legend = c('Treatment','Control' ))
+
+plot(c(-1,2), c(0,20), type='n',  xlab = expression(mu[diff]), ylab = 'Density', main = 'Posterior distribution for'~ mu[diff])
+lines(density(treatment2.posteriors[,1] - control2.posteriors[,1]))
+
+```
+Pre-Post analysis
+
+```{python}
+treatment_kpi1 = pd.read_csv('./post_treatment_kpi1.csv')
+treatment_kpi1
+all_kpi1 = pd.read_csv('./pre_all_kpi1.csv')
+all_kpi1
+
+
+treatment_group_w_pre_post_mins = treatment_kpi1[['uid','avg_active_mins']].merge(all_kpi1[['uid','avg_active_mins']], on= 'uid', suffixes = ['_post', '_pre'])
+treatment_group_w_pre_post_mins[['avg_active_mins_pre', 'avg_active_mins_post']].to_csv('pre_post_treatment_kp1.csv', index = False)
+```
+
+```{r}
+library(MASS)
+pre_post_treatment <- read.csv('./pre_post_treatment_kp1.csv')
+# cov(pre_post_treatment)
+mu0 <- c(5,6)
+nu0 = 4 # vague prior belief
+lambda0 <- matrix(c(16, 12.8, 12.8, 16), byrow = T, nrow = 2)
+s0 <- lambda0
+# s0_inv = solve(s0)
+# lambda0_inv = solve(lambda0)
+
+get_MCMC_samples <- function(data, repl, mu0, nu0, lambda0, s0) {
+  p = ncol(data)
+  n <- nrow(data)
+  y.mean <- apply(data, MARGIN  = 2, FUN = mean)
+  
+  s0_inv = solve(s0)
+  lambda0_inv = solve(lambda0)
+  
+  trace <- list(
+    mu = array(NA, dim = c(repl, p)), 
+    sigma = array(NA, dim =c(repl, p, p)),
+    y.pred = array(NA, dim = c(repl, p))
+  )
+  
+  # initial values
+  
+  # set.seed(1)
+  mu <- mvrnorm(1, mu=mu0, Sigma= lambda0)
+  phi <- rWishart(n = 1, df = nu0, Sigma = s0_inv)[,,1]
+  sigma <- solve(phi)
+  
+  y.pred <- mvrnorm(1, mu = mu, Sigma = sigma)
+    
+  trace$mu[1,] <- mu
+  trace$sigma[1,,] <- sigma
+  trace$y.pred[1,] <- y.pred
+  
+  # Sampler
+  
+  for (i in 2:repl){
+    mu_n <- solve(lambda0_inv + n*phi) %*% (n * phi %*% y.mean + lambda0_inv %*% mu0)
+    sigma_n <- solve( lambda0_inv + n*phi)
+    mu <- mvrnorm(1, mu=mu_n, Sigma= sigma_n) #posterior mean vector
+    
+    nu_n <- n + nu0
+    SS <- array(
+      apply( apply(data, MARGIN = 1, FUN = function(x) (x - mu) %*% t(x - mu)), MARGIN = 1, FUN = sum ),
+      dim = rep(dim(data)[2], dim(data)[2])
+    )
+    s_n_inv <- solve(s0 + SS)
+    phi <- rWishart(n=1, df=nu_n, Sigma=s_n_inv)[,,1]
+    sigma <- solve(phi) # posteror var-cov matrix
+    
+    trace$mu[i,] <- mu
+    trace$sigma[i,,] <- sigma
+    trace$y.pred[i,] <- mvrnorm(1, mu = mu, Sigma = sigma)
+  }
+  trace
+  }
+repl = 1000
+pre_post_mcmc = get_MCMC_samples(pre_post_treatment, repl, mu0, nu0, lambda0, s0) # using the priors defined in a)
+```
+
+```{r}
+mean(pre_post_mcmc$mu[,1] < pre_post_mcmc$mu[,2])
+mean( pre_post_mcmc$mu[,2]/pre_post_mcmc$mu[,1])
+
+plot(c(0,10), c(0,50), type='n',  xlab = expression(mu), ylab = 'Density', main = 'Posterior distribution for'~ mu)
+lines(density(pre_post_mcmc$mu[,1]), col= 'blue')
+lines(density(pre_post_mcmc$mu[,2]), col= 'orange')
+legend('topleft', col = c('blue','orange'), lty = c(1,1), legend = c('Before','After' ))
+
+
+plot(density(pre_post_mcmc$mu[,2]-pre_post_mcmc$mu[,1]))
+```
