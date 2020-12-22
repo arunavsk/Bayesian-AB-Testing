@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 ```
 
 ```{python}
-user_active_pre = pd.read_csv('./t3_user_active_min_pre.csv')
+user_active_pre = pd.read_csv('../data/t3_user_active_min_pre.csv')
 # print(user_active_pre.dtypes)
 print(user_active_pre.nunique())
 user_active_pre.head()
@@ -45,7 +45,7 @@ user_active_pre_no_outlier
 user_active_grouped = user_active_pre_no_outlier.groupby('uid').agg({'active_mins':sum, 'dt':np.size}).reset_index()
 user_active_grouped['avg_active_mins'] = user_active_grouped['active_mins'] / user_active_grouped['dt']
 user_active_grouped.describe()
-user_active_grouped.to_csv('./pre_all_kpi1.csv', index = False)
+user_active_grouped.to_csv('../processed/pre_all_kpi1.csv', index = False)
 ```
 ```{python}
 dt_active_grouped = user_active_pre_no_outlier.groupby(['dt'])['active_mins'].mean().reset_index()

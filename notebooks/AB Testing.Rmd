@@ -22,7 +22,7 @@ import datetime
 <h3>EDA : User Active</h3>
 
 ```{python}
-user_active = pd.read_csv('./t1_user_active_min.csv')
+user_active = pd.read_csv('../data/t1_user_active_min.csv')
 # print(user_active.dtypes)
 print(user_active.nunique())
 user_active.head()
@@ -46,7 +46,7 @@ user_active_no_outlier.boxplot(column=['active_mins'], figsize=(3,2), grid = Fal
 
 <h3>EDA : User Variant </h3>
 ```{python}
-user_variant = pd.read_csv('./t2_user_variant.csv')
+user_variant = pd.read_csv('../data/t2_user_variant.csv')
 # print(user_variant.dtypes)
 print(user_variant.nunique())
 user_variant.head()
@@ -69,9 +69,9 @@ control_group_kpi1 = user_active_grouped[user_active_grouped['variant_number'] =
 control_group_kpi1.describe()
 treatment_group_kpi1 = user_active_grouped[user_active_grouped['variant_number'] == 1 ]
 treatment_group_kpi1.describe()
-treatment_group_kpi1.to_csv('./post_treatment_kpi1.csv', index = False)
-control_group_kpi1['avg_active_mins'].to_csv('./control_kpi1.csv', index = False)
-treatment_group_kpi1['avg_active_mins'].to_csv('./treatment_kpi1.csv', index = False)
+treatment_group_kpi1.to_csv('../processed/post_treatment_kpi1.csv', index = False)
+control_group_kpi1['avg_active_mins'].to_csv('../processed/control_kpi1.csv', index = False)
+treatment_group_kpi1['avg_active_mins'].to_csv('../processed/treatment_kpi1.csv', index = False)
 
 # KPI 2 - average active time per day
 dt_active_grouped = user_active_no_outlier_w_variant.groupby(['dt','variant_number'])['active_mins'].mean().reset_index()
@@ -81,22 +81,18 @@ control_group_kpi2.describe()
 treatment_group_kpi2 = dt_active_grouped[dt_active_grouped['variant_number'] == 1 ]
 treatment_group_kpi2.describe()
 
-control_group_kpi2['active_mins'].to_csv('./control_kpi2.csv', index = False)
-treatment_group_kpi2['active_mins'].to_csv('./treatment_kpi2.csv', index = False)
+control_group_kpi2['active_mins'].to_csv('../processed/control_kpi2.csv', index = False)
+treatment_group_kpi2['active_mins'].to_csv('../processed/treatment_kpi2.csv', index = False)
 ```
 
 <h3> Let go R </h3>
 
 ```{r}
-name = 'arunav'
-paste('hi', name)
-```
-```{r}
-control1 <- read.csv('./control_kpi1.csv')
-treatment1 <- read.csv('./treatment_kpi1.csv')
+control1 <- read.csv('../processed/control_kpi1.csv')
+treatment1 <- read.csv('../processed/treatment_kpi1.csv')
 
-control2 <- read.csv('./control_kpi2.csv')
-treatment2 <- read.csv('./treatment_kpi2.csv')
+control2 <- read.csv('../processed/control_kpi2.csv')
+treatment2 <- read.csv('../processed/treatment_kpi2.csv')
 
 eda_plots <- function(control, treatment, title){
   hist(control[,1], probability = T)
@@ -109,6 +105,10 @@ eda_plots <- function(control, treatment, title){
 }
 eda_plots(control1, treatment1, 'Distribution of avg active time per user')
 eda_plots(control2, treatment2, 'Distribution of avg active time per day')
+summary(control1)
+sqrt(var(control1[1]))
+summary(treatment1)
+sqrt(var(treatment1[1]))
 ```
 
 Priors and Posteriors
@@ -213,6 +213,11 @@ lines(density(treatment1.posteriors[,1]), col= 'blue')
 lines(density(control1.posteriors[,1]), col= 'orange')
 legend('topleft', col = c('blue','orange'), lty = c(1,1), legend = c('Treatment','Control' ))
 
+plot(c(15,30), c(0,20), type='n',  xlab = expression(sigma^2), ylab = 'Density', main = 'Posterior distribution for'~ sigma^2)
+lines(density(treatment1.posteriors[,2]), col= 'blue')
+lines(density(control1.posteriors[,2]), col= 'orange')
+legend('topleft', col = c('blue','orange'), lty = c(1,1), legend = c('Treatment','Control' ))
+
 plot(c(-1,2), c(0,20), type='n',  xlab = expression(mu[diff]), ylab = 'Density', main = 'Posterior distribution for'~ mu[diff])
 lines(density(treatment1.posteriors[,1] - control1.posteriors[,1]))
 ```
@@ -222,7 +227,7 @@ KPI 2
 ## KPI 2
 mu0 = 6.4
 tau20 = 1
-sigma20 = 0.15*0.15
+sigma20 = 0.16*0.16
 nu0 = 1
 m = 10000 
 mu_initial = 5
@@ -248,6 +253,7 @@ effectiveSize(treatment2.mcmc)
 ```{r}
 
 mean(treatment2.posteriors[,1] > control2.posteriors[,1])
+mean(treatment2.posteriors[,1] > control2.posteriors[,1])
 mean(treatment2.posteriors[,1] / control2.posteriors[,1])
 
 
@@ -263,24 +269,24 @@ lines(density(treatment2.posteriors[,1] - control2.posteriors[,1]))
 Pre-Post analysis
 
 ```{python}
-treatment_kpi1 = pd.read_csv('./post_treatment_kpi1.csv')
+treatment_kpi1 = pd.read_csv('../processed/post_treatment_kpi1.csv')
 treatment_kpi1
-all_kpi1 = pd.read_csv('./pre_all_kpi1.csv')
+all_kpi1 = pd.read_csv('../processed/pre_all_kpi1.csv')
 all_kpi1
 
 
 treatment_group_w_pre_post_mins = treatment_kpi1[['uid','avg_active_mins']].merge(all_kpi1[['uid','avg_active_mins']], on= 'uid', suffixes = ['_post', '_pre'])
-treatment_group_w_pre_post_mins[['avg_active_mins_pre', 'avg_active_mins_post']].to_csv('pre_post_treatment_kp1.csv', index = False)
+treatment_group_w_pre_post_mins[['avg_active_mins_pre', 'avg_active_mins_post']].to_csv('../processed/pre_post_treatment_kp1.csv', index = False)
 ```
 
 ```{r}
 library(MASS)
-pre_post_treatment <- read.csv('./pre_post_treatment_kp1.csv')
+pre_post_treatment <- read.csv('../processed/pre_post_treatment_kp1.csv')
 # cov(pre_post_treatment)
-mu0 <- c(5,6)
+mu0 <- c(5,5)
 nu0 = 4 # vague prior belief
-lambda0 <- matrix(c(16, 12.8, 12.8, 16), byrow = T, nrow = 2)
-s0 <- lambda0
+lambda0 <- matrix(c(1, 0.8, 0.8, 1), byrow = T, nrow = 2)
+s0 <- matrix(c(16, 12.8, 12.8, 16), byrow = T, nrow = 2)
 # s0_inv = solve(s0)
 # lambda0_inv = solve(lambda0)
 
@@ -339,6 +345,7 @@ pre_post_mcmc = get_MCMC_samples(pre_post_treatment, repl, mu0, nu0, lambda0, s0
 
 ```{r}
 mean(pre_post_mcmc$mu[,1] < pre_post_mcmc$mu[,2])
+mean(pre_post_mcmc$mu[,2]- mean(pre_post_mcmc$mu[,1]) > 2)
 mean( pre_post_mcmc$mu[,2]/pre_post_mcmc$mu[,1])
 
 plot(c(0,10), c(0,50), type='n',  xlab = expression(mu), ylab = 'Density', main = 'Posterior distribution for'~ mu)
