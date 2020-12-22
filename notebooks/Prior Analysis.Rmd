@@ -1,6 +1,6 @@
 ---
 title: "Prior Analysis"
-output: html_notebook
+output: github_document
 ---
 
 ```{r setup, include=FALSE}

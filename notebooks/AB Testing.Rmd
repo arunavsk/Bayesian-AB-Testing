@@ -1,8 +1,6 @@
 ---
 title: "Bayesian A/B Testing for Measuring User Engagement in a Mobile App"
-output:
-  html_document:
-    df_print: paged
+output: github_document
 ---
 
 
